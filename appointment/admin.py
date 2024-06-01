@@ -11,7 +11,7 @@ from django.contrib import admin
 
 from .models import (
     Appointment, AppointmentRequest, AppointmentRescheduleHistory, Config, DayOff, EmailVerificationCode,
-    PasswordResetToken, Service, StaffMember, WorkingHours
+    PasswordResetToken, Service, StaffMember, WorkingHours, BusinessProfile
 )
 
 
@@ -48,6 +48,23 @@ class ConfigAdmin(admin.ModelAdmin):
 
 
 # Define a custom ModelForm for StaffMember
+
+
+class BusinessForm(forms.ModelForm):
+    class Meta:
+        model = BusinessProfile
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+@admin.register(BusinessProfile)
+class BusinessProfileAdmin(admin.ModelAdmin):
+    form = BusinessForm
+    list_display = ('user', 'name')
+
+
 class StaffMemberForm(forms.ModelForm):
     class Meta:
         model = StaffMember

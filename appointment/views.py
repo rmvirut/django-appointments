@@ -187,8 +187,7 @@ def appointment_request(request, service_id=None, staff_member_id=None):
     staff_member = None
     all_staff_members = None
     available_slots = []
-    config = Config.objects.first()
-    label = config.app_offered_by_label if config else _("Offered by")
+    config = ''
 
     if service_id:
         service = get_object_or_404(Service, pk=service_id)
@@ -199,14 +198,19 @@ def appointment_request(request, service_id=None, staff_member_id=None):
             staff_member = all_staff_members.first()
             x, available_slots = get_appointments_and_slots(date.today(), service)
 
+        # get the business' config
+        config = Config.objects.select_related('business').filter(business=service.business)
+
     # If a specific staff member is selected, fetch their slots.
     if staff_member_id:
         staff_member = get_object_or_404(StaffMember, pk=staff_member_id)
         y, available_slots = get_appointments_and_slots(date.today(), service)
+        config = Config.objects.select_related('business').filter(staff_member.business)
 
     page_title = f"{service.name} - {get_website_name()}"
     page_description = _("Book an appointment for {s} at {wn}.").format(s=service.name, wn=get_website_name())
 
+    label = config.app_offered_by_label if config else _("Offered by")
     date_chosen = date.today().strftime("%a, %B %d, %Y")
     extra_context = {
         'service': service,
@@ -482,7 +486,7 @@ def prepare_reschedule_appointment(request, id_request):
 
     service = ar.service
     selected_sm = ar.staff_member
-    config = Config.objects.first()
+    config = Config.objects.select_related('business').filter(business=service.business)
     label = config.app_offered_by_label if config else _("Offered by")
     # if staff change allowed, filter all staff offering the service otherwise, filter only the selected staff member
     staff_filter_criteria = {'id': ar.staff_member.id} if not staff_change_allowed_on_reschedule() else {

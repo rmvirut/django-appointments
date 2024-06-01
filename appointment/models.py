@@ -57,6 +57,14 @@ def generate_rgb_color():
     return f'rgb({r}, {g}, {b})'
 
 
+class BusinessProfile(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=80, null=True, blank=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Service(models.Model):
     """
     Represents a service provided by the appointment system.
@@ -65,6 +73,7 @@ class Service(models.Model):
     Version: 1.1.0
     Since: 1.0.0
     """
+    business = models.ForeignKey(to=BusinessProfile, on_delete=models.CASCADE)
     name = models.CharField(max_length=100, blank=False)
     description = models.TextField(blank=True, null=True)
     duration = models.DurationField(validators=[MinValueValidator(datetime.timedelta(seconds=1))])
@@ -160,6 +169,7 @@ class Service(models.Model):
 
 
 class StaffMember(models.Model):
+    business = models.ForeignKey(to=BusinessProfile, on_delete=models.CASCADE)
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     services_offered = models.ManyToManyField(Service)
     slot_duration = models.PositiveIntegerField(
@@ -286,6 +296,7 @@ class AppointmentRequest(models.Model):
     start_time = models.TimeField()
     end_time = models.TimeField()
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
+    business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE)
     staff_member = models.ForeignKey(StaffMember, on_delete=models.SET_NULL, null=True)
     payment_type = models.CharField(max_length=4, choices=PAYMENT_TYPES, default='full')
     id_request = models.CharField(max_length=100, blank=True, null=True)
@@ -431,6 +442,7 @@ class Appointment(models.Model):
     Since: 1.0.0
     """
     client = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, null=False)
     appointment_request = models.OneToOneField(AppointmentRequest, on_delete=models.CASCADE)
     phone = PhoneNumberField(blank=True)
     address = models.CharField(max_length=255, blank=True, null=True, default="",
@@ -615,13 +627,17 @@ class Appointment(models.Model):
 
 class Config(models.Model):
     """
-    Represents configuration settings for the appointment system. There can only be one Config object in the database.
-    If you want to change the settings, you must edit the existing Config object.
+    Represents configuration settings for the appointment system. Updated to support more that 1 Config. Configs are
+    linked to their respective business
 
     Author: Adams Pierre David
+    Modified by: Kojo Acquah
     Version: 1.1.0
     Since: 1.1.0
     """
+
+    business = models.ForeignKey(to=BusinessProfile, on_delete=models.CASCADE)
+
     slot_duration = models.PositiveIntegerField(
         null=True,
         help_text=_("Minimum time for an appointment in minutes, recommended 30."),
@@ -662,8 +678,8 @@ class Config(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def clean(self):
-        if Config.objects.exists() and not self.pk:
-            raise ValidationError(_("You can only create one Config object"))
+        # if Config.objects.exists() and not self.pk:
+        #     raise ValidationError(_("You can only create one Config object"))
         if self.lead_time is not None and self.finish_time is not None:
             if self.lead_time >= self.finish_time:
                 raise ValidationError(_("Lead time must be before finish time"))
@@ -674,7 +690,6 @@ class Config(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
-        self.pk = 1
         super(Config, self).save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

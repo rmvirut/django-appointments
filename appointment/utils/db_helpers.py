@@ -20,6 +20,7 @@ from django_q.models import Schedule
 from django_q.tasks import schedule
 
 from appointment.logger_config import logger
+# TODO: import settings from business instead?
 from appointment.settings import (
     APPOINTMENT_BUFFER_TIME, APPOINTMENT_FINISH_TIME, APPOINTMENT_LEAD_TIME, APPOINTMENT_PAYMENT_URL,
     APPOINTMENT_SLOT_DURATION, APPOINTMENT_WEBSITE_NAME
@@ -103,8 +104,8 @@ def create_and_save_appointment(ar, client_data: dict, appointment_data: dict, r
     """
     user = get_user_by_email(client_data['email'])
     appointment = Appointment.objects.create(
-            client=user, appointment_request=ar,
-            **appointment_data
+        client=user, appointment_request=ar,
+        **appointment_data
     )
     appointment.save()
     logger.info(f"New appointment created: {appointment.to_dict()}")
@@ -180,8 +181,8 @@ def update_appointment_reminder(appointment, new_date, new_start_time, request, 
             schedule_email_reminder(appointment, request, new_datetime)
         else:
             logger.info(
-                    f"Reminder for appointment {appointment.id} is not scheduled per "
-                    f"user's preference or past datetime.")
+                f"Reminder for appointment {appointment.id} is not scheduled per "
+                f"user's preference or past datetime.")
 
     # Update the appointment's reminder preference
     appointment.want_reminder = want_reminder
@@ -203,7 +204,8 @@ def can_appointment_be_rescheduled(appointment_request):
     # Filter reschedule histories to those created within the last 5 minutes
     recent_reschedule_count = appointment_request.reschedule_histories.filter(created_at__gte=five_minutes_ago).count()
     service = appointment_request.service
-    config = Config.get_instance()
+    # Get the business' config instead of using the static method
+    config = Config.objects.filter(business=appointment_request.business)
 
     # Determine which rescheduled limit to use based on service settings
     if service.allow_rescheduling:
@@ -314,8 +316,8 @@ def create_payment_info_and_get_url(appointment):
             urlparse(APPOINTMENT_PAYMENT_URL).netloc):
         # It's a Django reverse URL; generate the URL
         payment_url = reverse(
-                APPOINTMENT_PAYMENT_URL,
-                kwargs={'object_id': payment_info.id, 'id_request': payment_info.get_id_request()}
+            APPOINTMENT_PAYMENT_URL,
+            kwargs={'object_id': payment_info.id, 'id_request': payment_info.get_id_request()}
         )
     else:
         # It's an external link; return as is or append necessary data
@@ -355,10 +357,10 @@ def exclude_pending_reschedules(slots, staff_member, date):
     # Calculate the time window for "last 5 minutes"
     ten_minutes_ago = timezone.now() - datetime.timedelta(minutes=5)
     pending_reschedules = AppointmentRescheduleHistory.objects.filter(
-            appointment_request__staff_member=staff_member,
-            date=date,
-            reschedule_status='pending',
-            created_at__gte=ten_minutes_ago
+        appointment_request__staff_member=staff_member,
+        date=date,
+        reschedule_status='pending',
+        created_at__gte=ten_minutes_ago
     )
 
     # Filter out slots that overlap with any pending rescheduling
@@ -404,14 +406,17 @@ def get_all_staff_members() -> list:
     return StaffMember.objects.all()
 
 
-def get_appointment_buffer_time():
+def get_appointment_buffer_time(**kwargs):
     """Get the appointment buffer time from the settings file.
 
     :return: The appointment buffer time
     """
     from appointment.models import Config
 
-    config = Config.objects.first()
+    config = ''
+
+    if 'business' in kwargs:
+        config = Config.objects.filter(business=kwargs['business'])
 
     if config and config.appointment_buffer_time:
         return config.appointment_buffer_time
@@ -430,42 +435,51 @@ def get_appointment_by_id(appointment_id):
         return None
 
 
-def get_appointment_finish_time():
+def get_appointment_finish_time(**kwargs):
     """Get the appointment finish time from the settings file.
 
     :return: The appointment's finish time
     """
     from appointment.models import Config
 
-    config = Config.objects.first()
+    config = ''
+
+    if 'business' in kwargs:
+        config = Config.objects.filter(business=kwargs['business'])
 
     if config and config.finish_time:
         return config.finish_time
     return APPOINTMENT_FINISH_TIME
 
 
-def get_appointment_lead_time():
+def get_appointment_lead_time(**kwargs):
     """Get the appointment lead time from the settings file.
 
     :return: The appointment's lead time
     """
     from appointment.models import Config
 
-    config = Config.objects.first()
+    config = ''
+
+    if 'business' in kwargs:
+        config = Config.objects.filter(business=kwargs['business'])
 
     if config and config.lead_time:
         return config.lead_time
     return APPOINTMENT_LEAD_TIME
 
 
-def get_appointment_slot_duration():
+def get_appointment_slot_duration(**kwargs):
     """Get the appointment slot duration from the settings file.
 
     :return: The appointment slot duration
     """
     from appointment.models import Config
 
-    config = Config.objects.first()
+    config = ''
+
+    if 'business' in kwargs:
+        config = Config.objects.filter(business=kwargs['business'])
 
     if config and config.slot_duration:
         return config.slot_duration
@@ -483,20 +497,18 @@ def get_appointments_for_date_and_time(date, start_time, end_time, staff_member)
     :return: QuerySet, all appointments that overlap with the specified date and time range
     """
     return Appointment.objects.filter(
-            appointment_request__date=date,
-            appointment_request__start_time__lte=end_time,
-            appointment_request__end_time__gte=start_time,
-            appointment_request__staff_member=staff_member
+        appointment_request__date=date,
+        appointment_request__start_time__lte=end_time,
+        appointment_request__end_time__gte=start_time,
+        appointment_request__staff_member=staff_member
     )
 
 
-def get_config():
+def get_config(business):
     """Returns the configuration object from the database or the cache."""
-    config = cache.get('config')
-    if not config:
-        config = Config.objects.first()
-        # Cache the configuration for 1 hour (3600 seconds)
-        cache.set('config', config, 3600)
+
+    config = Config.objects.select_related('business').filter(business=business)
+
     return config
 
 
@@ -587,13 +599,13 @@ def get_staff_member_start_time(staff_member: StaffMember, date: datetime.date) 
     return working_hours['start_time']
 
 
-def get_times_from_config(date):
+def get_times_from_config(date, business):
     """Get the start time, end time, slot duration, and buffer time from the configuration or the settings file.
 
     :param date: The date to get the times for.
     :return: The start time, end time, slot duration, and buffer time.
     """
-    config = get_config()
+    config = get_config(business=business)
     if config:
         start_time = datetime.datetime.combine(date, datetime.time(hour=config.lead_time.hour,
                                                                    minute=config.lead_time.minute))
@@ -621,14 +633,14 @@ def get_user_by_email(email: str):
     return CLIENT_MODEL.objects.filter(email=email).first()
 
 
-def get_website_name() -> str:
+def get_website_name(business) -> str:
     """Get the website name from the configuration file.
 
     :return: The website name
     """
     from appointment.models import Config
 
-    config = Config.objects.first()
+    config = Config.objects.select_related('business').filter(business=business)
 
     if config and config.website_name != "":
         return config.website_name
